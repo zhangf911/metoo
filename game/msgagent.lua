@@ -2,14 +2,13 @@ local skynet = require "skynet"
 local queue = require "skynet.queue"
 local snax = require "snax"
 local netpack = require "netpack"
-local profile = require "profile"
 local protobuf = require "protobuf"
 
 local cs = queue()
 local UID
 local SUB_ID
 local SECRET
-local user_dc
+--local user_dc
 local afktime = 0
 
 local gate		-- 游戏服务器gate地址
@@ -17,23 +16,6 @@ local CMD = {}
 
 local worker_co
 local running = false
-
-local ti = {}
-setmetatable(ti, { __mode = "k" })
-
-local function update_ti(name, usetime)
-	if ti[name] then
-		ti[name].count = ti[name].count + 1
-		ti[name].time = ti[name].time + usetime
-	else
-		ti[name] = { count = 1, time = usetime }
-	end
-end
-
-local function timing()
-	return ti
-end
-
 
 local timer_list = {}
 
@@ -67,9 +49,9 @@ end
 
 local function worker()
 	local t = skynet.now()
-	while true do
+	while running do
 		dispatch_timertask()
-		local n = skynet.now() + 100 - t
+		local n = 100 + t - skynet.now()
 		skynet.sleep(n)
 		t = t + 100
 	end
@@ -114,7 +96,7 @@ end
 -- 玩家登录游服后调用
 function CMD.login(source, uid, subid, secret)
 	-- you may use secret to make a encrypted data stream
-	LOG_INFO(string.format("%s is login", uid))
+	LOG_INFO(string.format("%d is login", uid))
 	gate = source
 	UID = uid
 	SUB_ID = subid
@@ -122,12 +104,11 @@ function CMD.login(source, uid, subid, secret)
 
 	ti = {}
 	afktime = 0
-	-- you may load user data from database
 end
 
 -- 玩家登录游服，握手成功后调用
 function CMD.auth(source, uid)
-	LOG_INFO(string.format("%s is real login", uid))
+	LOG_INFO(string.format("%d is real login", uid))
 	LOG_INFO("call dcmgr to load user data uid=%d", uid)
 	skynet.call("dcmgr", "lua", "load", uid)	-- 加载玩家数据，重复加载是无害的
 
@@ -151,7 +132,7 @@ function CMD.afk(source)
 end
 
 local function msg_unpack(msg, sz)
-	local data = netpack.tostring(msg, sz, 0) --必须为0,否则这边会直接被free掉,会造成coredump
+	local data = netpack.tostring(msg, sz, 0) -- 必须为0, 否则会产生double free
 	local netmsg = protobuf.decode("netmsg.NetMsg", data)
 
 	if not netmsg then
@@ -191,7 +172,6 @@ local function msg_dispatch(netmsg)
 		return logout()
 	end
 
-	profile.start()
 	local name = netmsg.name
 	LOG_INFO("calling to %s", name)
 	local module, method = netmsg.name:match "([^.]*).(.*)"
@@ -214,9 +194,8 @@ local function msg_dispatch(netmsg)
 		data.errmsg = format_errmsg(errno, errmsg)
 	end
 
-	update_ti(netmsg.name, profile.stop())
 	local result = msg_pack(data)
-	LOG_DEBUG("dispatch over:%f, %s",skynet.time()-begin, name)
+	LOG_INFO("process %s time used %f ms", name, (skynet.time()-begin)*10)
 
 	return result
 end
@@ -242,5 +221,5 @@ skynet.start(function()
 	end)
 
 	protobuf.register_file("./protocol/netmsg.pb")
-	user_dc = snax.uniqueservice("userdc")
+	--user_dc = snax.uniqueservice("userdc")
 end)
